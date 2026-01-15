@@ -24,7 +24,7 @@ extern void pet_menu();
 extern void rouletteGame();
 extern void snakeGame();
 extern void custom_apps_menu();
-
+extern void playPong();
 // Утилиты
 extern void ShowFilesLittleFS(); // Читалка
 extern void calc();
@@ -49,8 +49,9 @@ void open_graphical_utils();
 // --- 1. МЕНЮ ИГР ---
 GraphMenuItem items_Games[] = {
   {"Дино",     dino_icon_24x24,            dinosaurGame},
+  {"Пинг-Понг",dino_icon_24x24,            playPong},
   {"Тамогочи", catosgotchi_icon_24x24,     pet_menu},
-  {"Рулетка",  nullptr,                rouletteGame},
+  {"Рулетка",  nullptr,                    rouletteGame},
   {"Змейка",   nullptr,                    snakeGame},
   {"Назад",    exit_bitmap_24x24,          nullptr}
 };

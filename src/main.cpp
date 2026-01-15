@@ -24,11 +24,37 @@
 #include <vector>
 #include <stack>
 #include <map>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 #include "driver/gpio.h"
 #include "arduino_dino.h"
 #include "bitmaps.h"
 #include "custom_app.h"
 
+// ЗДЕСЬ МОЖНО НАСТРОИТЬ ПИНЫ НАПРИМЕР ДЛЯ DIY
+#ifdef CATOS_S3_BUILD
+  //настройки для билда для s3
+  #define PIN_LED    3    //светодиод
+  #define PIN_SDA    8    //sda дисплея/rtc
+  #define PIN_SCL    9    //scl дисплея/rtc
+  
+  //кнопки
+  #define PIN_BTN_L  7
+  #define PIN_BTN_OK 6
+  #define PIN_BTN_R  5
+  #define PIN_PWR    4
+#else
+  //настройки для билда для c3
+  #define PIN_LED    20
+  
+  //кнопки
+  #define PIN_BTN_L  21
+  #define PIN_BTN_OK 6
+  #define PIN_BTN_R  10
+  #define PIN_PWR    7
+#endif
+
+//-----------------------
 // объекты
 Random16 rnd;                           // рандом
 GyverDS3231 rtc;                        //часики
@@ -38,14 +64,14 @@ SettingsGyver sett("CatOS-Watch " FIRMWARE_VERSION, &db); // веб морда
 
 bool ledState = false;
 
-GButton left(21); 
-GButton ok(6);  
-GButton right(10);
-
-GButton PWR(7); 
-
+GButton left(PIN_BTN_L); 
+GButton ok(PIN_BTN_OK);  
+GButton right(PIN_BTN_R);
+GButton PWR(PIN_PWR);
 
 
+
+void alarm_menu();
 // читалка
 byte cursor = 0;            // курсор меню
 byte files = 0;             // количество файлов
@@ -74,7 +100,7 @@ bool dotsVisible = true;
 unsigned long lastBlink = 0;
 unsigned long lastUpdate = 0;
 AlarmConfig alarmConfig = {0, 0, 1, 1, false, false};
-bool alarmActive = false; //флаг состояния будильника
+bool alarmActive = false;  //флаг состояния будильника
 bool alarmRinging = false; //флаг срабатывания будильника
 uint8_t watchfaceStyle;
 bool isSleeping = false;
@@ -292,105 +318,6 @@ void showAlarmScreen() {
 
   oled.invertDisplay(false);
 }
-void alarm_menu() {
-  uint8_t selected = 0;
-  uint8_t prevSelected = 0;
-  bool needFullRedraw = true;
-  bool needCursorRedraw = true;
-  
-  reset_buttons();
-  
-  while (true) {
-    buttons_tick();
-    
-    if (needFullRedraw) {
-      needFullRedraw = false;
-      
-      oled.clear();
-      ui_rama("Будильник", true, true, false);
-      oled.setCursor(2, 2);
-      oled.print(" Установить время ");
-      
-      oled.setCursor(2, 3);
-      oled.print(" Установить дату  ");
-      
-      oled.setCursor(2, 4);
-      oled.print(" Будильник: ");
-      oled.print(alarmActive ? "ВКЛ " : "ВЫКЛ");
-      
-      oled.setCursor(2, 5);
-      oled.print(" Назад           ");
-      
-      oled.setCursor(0, 7);
-      oled.print("Уст: ");
-      if (alarmConfig.hour < 10) oled.print("0");
-      oled.print(alarmConfig.hour);
-      oled.print(":");
-      if (alarmConfig.minute < 10) oled.print("0");
-      oled.print(alarmConfig.minute);
-      oled.print(" ");
-      if (alarmConfig.day < 10) oled.print("0");
-      oled.print(alarmConfig.day);
-      oled.print(" ");
-      oled.print(months[alarmConfig.month - 1]);
-      
-      oled.setCursor(0, 2 + selected);
-      oled.print(">");
-      
-      oled.update();
-      prevSelected = selected;
-    }
-    
-    if (needCursorRedraw && selected != prevSelected) {
-      oled.setCursor(0, 2 + prevSelected);
-      oled.print(" ");
-      
-      oled.setCursor(0, 2 + selected);
-      oled.print(">");
-      
-      oled.update();
-      prevSelected = selected;
-      needCursorRedraw = false;
-    }
-    
-    if (right.isClick() && selected > 0) {
-      selected--;
-      needCursorRedraw = true;
-    }
-    
-    if (left.isClick() && selected < 3) {
-      selected++;
-      needCursorRedraw = true;
-    }
-    
-    if (ok.isClick()) {
-      switch (selected) {
-        case 0: 
-          set_alarm_time(); 
-          needFullRedraw = true;
-          break;
-        case 1: 
-          set_alarm_date(); 
-          needFullRedraw = true;
-          break;
-        case 2: 
-          toggleAlarm();
-          needFullRedraw = true;
-          break;
-        case 3: 
-          exit();
-          return;
-      }
-    }
-    
-    if (ok.isHold()) {
-      exit();
-      return;
-    }
-    
-    delay(50);
-  }
-}
 void set_alarm_time() {
   Datime now = rtc.getTime();
   uint8_t hours = alarmActive ? alarmConfig.hour : now.hour;
@@ -564,6 +491,106 @@ void set_alarm_date() {
     delay(50);
   }
 }
+void alarm_menu() {
+  uint8_t selected = 0;
+  uint8_t prevSelected = 0;
+  bool needFullRedraw = true;
+  bool needCursorRedraw = true;
+  
+  reset_buttons();
+  
+  while (true) {
+    buttons_tick();
+    
+    if (needFullRedraw) {
+      needFullRedraw = false;
+      
+      oled.clear();
+      ui_rama("Будильник", true, true, false);
+      oled.setCursor(2, 2);
+      oled.print(" Установить время ");
+      
+      oled.setCursor(2, 3);
+      oled.print(" Установить дату  ");
+      
+      oled.setCursor(2, 4);
+      oled.print(" Будильник: ");
+      oled.print(alarmActive ? "ВКЛ " : "ВЫКЛ");
+      
+      oled.setCursor(2, 5);
+      oled.print(" Назад           ");
+      
+      oled.setCursor(0, 7);
+      oled.print("Уст: ");
+      if (alarmConfig.hour < 10) oled.print("0");
+      oled.print(alarmConfig.hour);
+      oled.print(":");
+      if (alarmConfig.minute < 10) oled.print("0");
+      oled.print(alarmConfig.minute);
+      oled.print(" ");
+      if (alarmConfig.day < 10) oled.print("0");
+      oled.print(alarmConfig.day);
+      oled.print(" ");
+      oled.print(months[alarmConfig.month - 1]);
+      
+      oled.setCursor(0, 2 + selected);
+      oled.print(">");
+      
+      oled.update();
+      prevSelected = selected;
+    }
+    
+    if (needCursorRedraw && selected != prevSelected) {
+      oled.setCursor(0, 2 + prevSelected);
+      oled.print(" ");
+      
+      oled.setCursor(0, 2 + selected);
+      oled.print(">");
+      
+      oled.update();
+      prevSelected = selected;
+      needCursorRedraw = false;
+    }
+    
+    if (right.isClick() && selected > 0) {
+      selected--;
+      needCursorRedraw = true;
+    }
+    
+    if (left.isClick() && selected < 3) {
+      selected++;
+      needCursorRedraw = true;
+    }
+    
+    if (ok.isClick()) {
+      switch (selected) {
+        case 0: 
+          set_alarm_time(); 
+          needFullRedraw = true;
+          break;
+        case 1: 
+          set_alarm_date(); 
+          needFullRedraw = true;
+          break;
+        case 2: 
+          toggleAlarm();
+          needFullRedraw = true;
+          break;
+        case 3: 
+          exit();
+          return;
+      }
+    }
+    
+    if (ok.isHold()) {
+      exit();
+      return;
+    }
+    
+    delay(50);
+  }
+}
+
 void playDinosaurGame(void) {
   right.setTimeout(160);         // Настраиваем удобные таймауты удержания
   ok.setTimeout(160);
@@ -757,6 +784,76 @@ void dinosaurGame(void) {                                                       
 }
 
 
+// переделанный код пинг понга
+void playPong() {
+  const int PH = 12, PW = 3, BS = 3; 
+  int pY = 26, aiY = 26;
+  float bX = 64, bY = 32, bVX = 2.5, bVY = 1.5;
+  int scP = 0, scAI = 0;
+  
+  reset_buttons(); 
+  oled.clear();
+
+  while (true) {
+    buttons_tick();
+    if (ok.isHold()) { oled.clear(); return; }
+
+    //мувмент
+    if (left.state()) pY -= 3;
+    if (right.state()) pY += 3;
+    pY = constrain(pY, 0, 64 - PH);
+
+    //ии
+    int aiCenter = aiY + (PH / 2);
+    int target = bY;
+    if (random(0, 100) < 5) target = random(0, 64); 
+
+    if (aiCenter < target - 2) aiY += 2;
+    else if (aiCenter > target + 2) aiY -= 2;
+    aiY = constrain(aiY, 0, 64 - PH);
+
+    bX += bVX; bY += bVY;
+    if (bY <= 0 || bY >= 64 - BS) bVY = -bVY;
+
+    if (bX <= PW && bX >= 0 && bY + BS >= pY && bY <= pY + PH) {
+      bVX = -bVX + 0.2; 
+      bX = PW + 1;
+      if (left.state()) bVY -= 0.5;
+      if (right.state()) bVY += 0.5;
+    }
+    if (bX >= 127 - PW - BS && bX <= 128 && bY + BS >= aiY && bY <= aiY + PH) {
+      bVX = -bVX;
+      bX = 127 - PW - BS - 1;
+    }
+
+    // счёт
+    if (bX < 0) {
+      scAI++; // L
+      bX = 64; bY = 32; bVX = 2.5; bVY = (random(0, 2) ? 1.5 : -1.5);
+    }
+    if (bX > 128) {
+      scP++; // W
+      bX = 64; bY = 32; bVX = -2.5; bVY = (random(0, 2) ? 1.5 : -1.5);
+    }
+
+    // графон
+    oled.clear();
+    
+    for (int i = 0; i < 64; i += 4) oled.fastLineV(63, i, i + 2, 1); 
+
+    // счёт
+    oled.setCursorXY(56, 0); 
+    oled.print(scP); oled.print(":"); oled.print(scAI);
+
+    // мяч и ракетки
+    oled.rect(0, pY, PW, pY + PH, OLED_FILL); 
+    oled.rect(127 - PW, aiY, 127, aiY + PH, OLED_FILL); 
+    oled.rect((int)bX, (int)bY, (int)bX + BS, (int)bY + BS, OLED_FILL);
+
+    oled.update();
+    delay(10); 
+  }
+}
 void rouletteGame() {
     const uint8_t* symbols[] = {
         chest_26x26,    // 0 - сундук (15%)
@@ -2656,8 +2753,6 @@ void ShowFilesLittleFS() {
 // тут можно настроить скорость перелистывания
 #define ANIMATION_SPEED 5
 
-GraphMenu* currentGraphMenu = nullptr;
-int currentGraphItemIndex = 0;
 
 
 int getRealStringLength(const char* str) {
@@ -2715,8 +2810,7 @@ void drawWidget(int x, const char* name, const uint8_t* icon, bool isCenter) {
 }
 
 void navigate_graphical_menu(GraphMenu* menu) {
-    currentGraphMenu = menu;
-    currentGraphItemIndex = 0; 
+    int currentGraphItemIndex = 0; 
     
     bool needRedraw = true;
     uint8_t last_minute = rtc.getTime().minute;
@@ -2738,6 +2832,7 @@ void navigate_graphical_menu(GraphMenu* menu) {
 
             //иконки и текст
             int total = menu->itemCount;
+            if (total == 0) return; 
             int prev = (currentGraphItemIndex - 1 + total) % total;
             int next = (currentGraphItemIndex + 1) % total;
 
@@ -3135,10 +3230,53 @@ void pet_menu() {
   }
 }
 void setup() {
-  Serial.begin(9600);
-  Wire.begin();
-  rtc.begin();
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  Serial.begin(115200);
+  delay(2000); 
   
+  Serial.println("boot");
+  Serial.println("catos" FIRMWARE_VERSION);
+  #ifdef CATOS_S3_BUILD
+    Serial.println("[log] s3 build");
+  #else
+    Serial.println("[log] c3 build");
+  #endif
+  Serial.println("[log] conf. pins");
+  
+  #ifdef CATOS_S3_BUILD
+    Wire.begin(PIN_SDA, PIN_SCL);
+    Wire.setClock(100000); 
+  #else
+    Serial.println("[log] start wire c3");
+    Wire.begin(); 
+  #endif
+  
+  delay(100);
+
+  Wire.beginTransmission(0x3C);
+  if (Wire.endTransmission() != 0) {
+      Serial.println("[log] oled not found");
+      Wire.end();
+      for (int i = 0; i < 3; i++) {
+        digitalWrite(PIN_LED, HIGH);
+        delay(100);
+        digitalWrite(PIN_LED, LOW);
+        delay(100);
+      }
+      #ifdef CATOS_S3_BUILD
+        Wire.begin(PIN_SDA, PIN_SCL);
+      #else
+        Wire.begin();
+      #endif
+  } else {
+      Serial.println("[log] oled found");
+  }
+  oled.init();
+  
+  
+  Serial.println("[log] start!");
+  rtc.begin();
+
   if (rtc.isReset()) {
     rtc.setBuildTime();
   }
@@ -3174,8 +3312,9 @@ void setup() {
   randomSeed(seed);
   rnd.setSeed(seed);
   // led
-  pinMode(20, OUTPUT);
-  digitalWrite(20, LOW);
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);
+  Wire.setClock(400000);
 }
 void wakeFromSleep() {
   //врубаем дисплей
@@ -3573,8 +3712,8 @@ public:
         cnt_click_ok = 0; cnt_click_left = 0; cnt_click_right = 0;
         buf_hold_ok = buf_hold_left = buf_hold_right = false;
 
-        digitalWrite(20, LOW);
-        Serial.println("Cat# v2.3 (Time Support)");
+        digitalWrite(PIN_LED, LOW);
+        Serial.println("Cat# v1.0");
         Wire.setClock(400000L);
 
         while (pos < tokens.size() && running) {
@@ -3702,7 +3841,7 @@ public:
                 
                 case OP_INVERT: { pos++; Variable v = evalExpr(); _oled->invertDisplay(v.intVal); break; }
                 case OP_CONTRAST: { pos++; Variable v = evalExpr(); _oled->setContrast(v.intVal); break; }
-                case OP_LED: { pos++; Variable v = evalExpr(); digitalWrite(20, v.intVal ? HIGH : LOW); break; }
+                case OP_LED: { pos++; Variable v = evalExpr(); digitalWrite(PIN_LED, v.intVal ? HIGH : LOW); break; }
 
                 case OP_EXIT: running = false; break;
                 
@@ -3715,7 +3854,7 @@ public:
         
         _oled->invertDisplay(false);
         _oled->setContrast(255);
-        digitalWrite(20, LOW);
+        digitalWrite(PIN_LED, LOW);
         Wire.setClock(100000L);
     }
 };
@@ -4069,7 +4208,7 @@ void loop() {
   checkAlarm();
   if (left.isClick()) {
     ledState = !ledState; 
-    digitalWrite(20, ledState ? HIGH : LOW);
+    digitalWrite(PIN_LED, ledState ? HIGH : LOW);
   }
   if (alarmRinging) {
     showAlarmScreen();
