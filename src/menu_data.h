@@ -55,7 +55,7 @@ GraphMenuItem items_Games[] = {
   {"Змейка",   nullptr,                    snakeGame},
   {"Назад",    exit_bitmap_24x24,          nullptr}
 };
-GraphMenu data_GamesMenu = {"Игры", 40, items_Games, 5};
+GraphMenu data_GamesMenu = {"Игры", 40, items_Games, 6};
 
 
 // --- 2. МЕНЮ WIFI ---
