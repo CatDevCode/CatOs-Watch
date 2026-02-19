@@ -18,6 +18,7 @@
 #include <LittleFS.h>       // для хранения данных в little fs
 #include <SettingsGyver.h>  // либа веб морды
 #include <Random16.h>
+#include "MAX17043.h"
 #include <WiFiServer.h>
 #include <WiFiClient.h>
 #include "esp_sleep.h"
@@ -30,8 +31,14 @@
 #include "arduino_dino.h"
 #include "bitmaps.h"
 #include "custom_app.h"
+#define USE_NIMBLE
+#include <BleMouse.h>
+#include <DFRobot_BMI160.h>
+BleMouse bleMouse("CatOS Mouse", "CatOS", 100);
+DFRobot_BMI160 bmi160;
 
-// ЗДЕСЬ МОЖНО НАСТРОИТЬ ПИНЫ НАПРИМЕР ДЛЯ DIY
+
+// ЗДЕСЬ МОЖНО НАСТРОИТЬ ПИНЫ, НАПРИМЕР ДЛЯ DIY
 #ifdef CATOS_S3_BUILD
   //настройки для билда для s3
   #define PIN_LED    3    //светодиод
@@ -3229,6 +3236,278 @@ void pet_menu() {
     delay(50);
   }
 }
+void air_mouse_app() {
+  reset_buttons();
+
+  // кфг
+  const int8_t i2c_addr = 0x69;
+  const float DIVIDER = 35.0; 
+  const int DEADZONE = 10; 
+  const float SMOOTH = 0.3; 
+  const int DIR_X = -1; 
+  const int DIR_Y = -1; 
+  const unsigned long MOVE_DELAY = 150; 
+
+  // чекаем
+  bool sensorFound = true;
+  if (bmi160.softReset() != BMI160_OK) sensorFound = false;
+  if (bmi160.I2cInit(i2c_addr) != BMI160_OK) sensorFound = false;
+
+  if (!sensorFound) {
+       oled.clear(); ui_rama("Air Mouse", true, true, false);
+       oled.setScale(2); oled.setCursor(10, 3); oled.print("Err");
+       oled.update(); delay(2000); return;
+  }
+
+  bleMouse.begin(); 
+  
+  int16_t data[6] = {0}; 
+  float valX = 0, valY = 0; 
+  
+  bool isConnectedOld = false;
+  bool needRedraw = true;
+  bool leftPressed = false;
+  bool rightPressed = false;
+  bool isActive = false;          
+  unsigned long btnPressTime = 0; 
+  uint8_t waitAnim = 0;
+
+  oled.clear(); oled.update();
+
+  while (true) {
+    buttons_tick();
+    PWR.tick(); 
+
+    if (ok.isHold()) {
+      oled.clear();
+      ui_rama("Выход...", true, true, false);
+      oled.update();
+      
+      bleMouse.end(); 
+      delay(100);
+      
+      exit();
+      return;
+    }
+
+    // конект
+    bool isConnected = bleMouse.isConnected();
+    if (isConnected != isConnectedOld) {
+        isConnectedOld = isConnected;
+        needRedraw = true;
+    }
+    //потом переименую кнопку
+    if (PWR.isDouble() && isConnected) {
+        bleMouse.press(MOUSE_RIGHT);
+        delay(30); 
+        bleMouse.release(MOUSE_RIGHT);
+        
+        oled.rect(64, 14, 64, 50, OLED_FILL); oled.update();
+        delay(100);
+        needRedraw = true;
+        isActive = false; valX = 0; valY = 0;
+    }
+
+    if (PWR.state()) {
+        if (btnPressTime == 0) btnPressTime = millis();
+        if (millis() - btnPressTime > MOVE_DELAY) {
+            if (!isActive) {
+                isActive = true;
+                needRedraw = true;
+                valX = 0; valY = 0;
+            }
+        }
+    } else {
+        btnPressTime = 0;
+        if (isActive) {
+            isActive = false;
+            needRedraw = true;
+        }
+    }
+
+    if (needRedraw || (!isConnected && millis() % 500 == 0)) {
+        oled.clear();
+        ui_rama("Air Mouse", true, true, false);
+        
+        if (!isConnected) {
+             oled.setCursor(55, 5);
+             if (waitAnim == 0) oled.print(".  ");
+             if (waitAnim == 1) oled.print(".. ");
+             if (waitAnim == 2) oled.print("...");
+             waitAnim++; if (waitAnim > 2) waitAnim = 0;
+             needRedraw = false; 
+        } else {
+            if (isActive) {
+                oled.roundRect(15, 20, 113, 45, OLED_FILL);
+                oled.invertText(true);
+                oled.setScale(1);
+                oled.invertText(false);
+            } else {
+                oled.roundRect(15, 20, 113, 45, OLED_STROKE);
+            }
+
+            oled.setCursor(0, 7); oled.print("ЛКМ");
+            oled.setCursor(108, 7); oled.print("ПКМ");
+            
+            if (leftPressed) oled.rect(0, 14, 15, 64, OLED_FILL);
+            if (rightPressed) oled.rect(113, 14, 128, 64, OLED_FILL);
+            
+            needRedraw = false;
+        }
+        oled.update();
+    }
+
+    if (isConnected) {
+        if (isActive) {
+            int rslt = bmi160.getAccelGyroData(data);
+            if (rslt == 0) {
+                float rawX = data[2]; 
+                float rawY = data[0]; 
+
+                if (abs(rawX) < DEADZONE) rawX = 0;
+                if (abs(rawY) < DEADZONE) rawY = 0;
+
+                valX = (valX * (1.0 - SMOOTH)) + (rawX * SMOOTH);
+                valY = (valY * (1.0 - SMOOTH)) + (rawY * SMOOTH);
+
+                int moveX = (int)((valX / DIVIDER) * DIR_X);
+                int moveY = (int)((valY / DIVIDER) * DIR_Y);
+                
+                moveX = constrain(moveX, -100, 100);
+                moveY = constrain(moveY, -100, 100);
+
+                if (moveX != 0 || moveY != 0) {
+                    bleMouse.move(moveX, moveY);
+                }
+            }
+        }
+
+        if (left.state() && !leftPressed) {
+            bleMouse.press(MOUSE_LEFT);
+            leftPressed = true;
+            needRedraw = true;
+        } 
+        else if (!left.state() && leftPressed) {
+            bleMouse.release(MOUSE_LEFT);
+            leftPressed = false;
+            needRedraw = true;
+        }
+
+        if (right.state() && !rightPressed) {
+            bleMouse.press(MOUSE_RIGHT);
+            rightPressed = true;
+            needRedraw = true;
+        } 
+        else if (!right.state() && rightPressed) {
+            bleMouse.release(MOUSE_RIGHT);
+            rightPressed = false;
+            needRedraw = true;
+        }
+    }
+    
+    delay(10); 
+  }
+}
+void battery_info() {
+  reset_buttons();
+  
+  bool needRedraw = true;
+  uint32_t lastCheck = 0;
+  
+  float oldVoltage = -1.0;
+  float oldPercent = -1.0;
+
+  oled.clear();
+  FuelGauge.clearAlert(); 
+  
+  while (true) {
+    buttons_tick();
+    
+    if (ok.isClick() || ok.isHold()) {
+      exit();
+      return;
+    }
+
+    if (millis() - lastCheck > 1000 || lastCheck == 0) {
+        lastCheck = millis();
+        
+        float voltage = FuelGauge.voltage() / 1000.0; 
+        float percent = FuelGauge.percent();
+        
+        if (abs(voltage - oldVoltage) > 0.01 || abs(percent - oldPercent) > 0.5) {
+            oldVoltage = voltage;
+            oldPercent = percent;
+            needRedraw = true;
+        }
+    }
+    
+    if (needRedraw) {
+        needRedraw = false;
+        oled.clear();
+        ui_rama("Батарея", true, true, false);
+        
+        oled.roundRect(4, 20, 54, 50, OLED_STROKE); 
+        oled.rect(0, 27, 4, 31, OLED_FILL);
+        oled.rect(0, 39, 4, 43, OLED_FILL);
+        
+        oled.line(18, 28, 14, 33, OLED_STROKE); 
+        oled.line(14, 33, 18, 33, OLED_STROKE); 
+        oled.line(18, 33, 14, 38, OLED_STROKE);
+
+        oled.line(40, 28, 36, 33, OLED_STROKE); 
+        oled.line(36, 33, 40, 33, OLED_STROKE); 
+        oled.line(40, 33, 36, 38, OLED_STROKE);
+        
+        if (oldPercent > 20) {
+            oled.line(22, 43, 24, 45, OLED_STROKE); 
+            oled.line(24, 45, 30, 45, OLED_STROKE); 
+            oled.line(30, 45, 32, 43, OLED_STROKE);
+        } else {
+            oled.line(22, 45, 24, 43, OLED_STROKE); 
+            oled.line(24, 43, 30, 43, OLED_STROKE); 
+            oled.line(30, 43, 32, 45, OLED_STROKE);
+        }
+
+        // инфа
+        oled.roundRect(60, 15, 127, 48, OLED_STROKE);
+        oled.line(54, 30, 60, 25, OLED_STROKE);
+        oled.line(54, 30, 60, 35, OLED_STROKE);
+        oled.line(60, 26, 60, 34, OLED_CLEAR); 
+        
+        oled.setScale(1);
+        
+        oled.setCursorXY(64, 19); 
+        if (oldPercent >= 90) oled.print("Full!");
+        else if (oldPercent >= 50) oled.print("Yummy!");
+        else if (oldPercent >= 20) oled.print("Hungry!");
+        else oled.print("Feed me!");
+        
+        oled.setCursorXY(64, 35);
+        oled.print("Lvl:");
+        
+        oled.setScale(2);
+        oled.setCursorXY(88, 30);
+        oled.print((int)oldPercent); 
+        
+        oled.setScale(1);
+        oled.fastLineH(54, 0, 127, OLED_STROKE);
+        
+        oled.setCursor(0, 7);
+        oled.print(oldVoltage, 2); oled.print("V");
+        
+        oled.setCursor(64, 7);
+        if (FuelGauge.alertIsActive() || oldPercent < 5) { 
+             oled.print("LOW BAT!"); 
+        } else {
+             oled.print("Status: OK");
+        }
+
+        oled.update();
+    }
+    
+    delay(20);
+  }
+}
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   Serial.begin(115200);
@@ -3252,7 +3531,13 @@ void setup() {
   #endif
   
   delay(100);
-
+  Serial.println("[log] init MAX17043");
+  if (FuelGauge.begin()) {
+    FuelGauge.quickstart();
+    Serial.println("[log] MAX17043 found");
+  } else {
+    Serial.println("[log] MAX17043 not found");
+  }
   Wire.beginTransmission(0x3C);
   if (Wire.endTransmission() != 0) {
       Serial.println("[log] oled not found");
@@ -3613,7 +3898,6 @@ private:
             else if (t.type == OP_DATE_D) res.intVal = dt.day;
             else if (t.type == OP_DATE_M) res.intVal = dt.month;
             else if (t.type == OP_DATE_Y) res.intVal = dt.year;
-            else if (t.type == OP_DATE_W) res.intVal = dt.weekDay;
             pos++;
         }
         else if (t.type == OP_CLICK || t.type == OP_HOLD || t.type == OP_PRESS) {

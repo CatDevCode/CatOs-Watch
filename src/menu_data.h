@@ -17,7 +17,7 @@ struct GraphMenu {
   uint8_t itemCount;      // Количество пунктов
 };
 
-// --- ССЫЛКИ НА ФУНКЦИИ (из main.cpp) ---
+
 // Игры и приложения
 extern void dinosaurGame();
 extern void pet_menu();
@@ -31,12 +31,12 @@ extern void calc();
 extern void stopwatch();
 extern void timer();
 extern void alarm_menu();
-
+extern void battery_info();
+extern void air_mouse_app();
 // WiFi
 extern void create_settings();   // Загрузка файлов
 extern void time_sync_menu();    // Синхронизация времени
 
-// --- ФУНКЦИИ НАВИГАЦИИ (которые мы напишем в main.cpp) ---
 void open_graphical_games();
 void open_graphical_wifi();
 void open_graphical_utils();
@@ -70,6 +70,8 @@ GraphMenu data_WifiMenu = {"WiFi", 35, items_Wifi, 3};
 // --- 3. МЕНЮ УТИЛИТ ---
 GraphMenuItem items_Utils[] = {
   {"Читалка",  book_icon_24x24,        ShowFilesLittleFS},
+  {"АКБ",      book_icon_24x24,        battery_info},
+  {"АКБ",      book_icon_24x24,        air_mouse_app},
   {"Калькул.", calc_icon_24x24,        calc},
   {"Секундом.",stopwatch_icon_24x24,   stopwatch},
   {"Таймер",   timer_icon_24x24,       timer},
