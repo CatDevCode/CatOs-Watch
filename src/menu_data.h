@@ -50,12 +50,14 @@ void open_graphical_utils();
 GraphMenuItem items_Games[] = {
   {"Дино",     dino_icon_24x24,            dinosaurGame},
   {"Пинг-Понг",dino_icon_24x24,            playPong},
+#ifndef CATOS_SPI_DISPLAY
   {"Тамогочи", catosgotchi_icon_24x24,     pet_menu},
+#endif
   {"Рулетка",  nullptr,                    rouletteGame},
   {"Змейка",   nullptr,                    snakeGame},
   {"Назад",    exit_bitmap_24x24,          nullptr}
 };
-GraphMenu data_GamesMenu = {"Игры", 40, items_Games, 6};
+GraphMenu data_GamesMenu = {"Игры", 40, items_Games, sizeof(items_Games)/sizeof(GraphMenuItem)};
 
 
 // --- 2. МЕНЮ WIFI ---
@@ -71,14 +73,16 @@ GraphMenu data_WifiMenu = {"WiFi", 35, items_Wifi, 3};
 GraphMenuItem items_Utils[] = {
   {"Читалка",  book_icon_24x24,        ShowFilesLittleFS},
   {"АКБ",      book_icon_24x24,        battery_info},
-  {"АКБ",      book_icon_24x24,        air_mouse_app},
+#ifndef CATOS_SPI_DISPLAY
+  {"Мышь",     book_icon_24x24,        air_mouse_app},
+#endif
   {"Калькул.", calc_icon_24x24,        calc},
   {"Секундом.",stopwatch_icon_24x24,   stopwatch},
   {"Таймер",   timer_icon_24x24,       timer},
   {"Будильн.", alarm_icon_menu_24x24,  alarm_menu},
   {"Назад",    exit_bitmap_24x24,      nullptr}
 };
-GraphMenu data_UtilsMenu = {"Утилиты", 60, items_Utils, 6};
+GraphMenu data_UtilsMenu = {"Утилиты", 60, items_Utils, sizeof(items_Utils)/sizeof(GraphMenuItem)};
 
 
 // --- 4. ГЛАВНОЕ МЕНЮ ---

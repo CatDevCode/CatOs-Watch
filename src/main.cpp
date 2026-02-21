@@ -5,12 +5,20 @@
 // CAT# ENGINE v1.0
 // CatOs Sleep v0.1
 
-
+#ifdef CATOS_SPI_DISPLAY
+#define FIRMWARE_VERSION "s.0.1"
+#else
 #define FIRMWARE_VERSION "w.0.1"
+#endif
 
-#include "Arduino.h"
+#include <Arduino.h>
+#include <map>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 #include <GyverOLED.h>
+#ifndef CATOS_NO_RTC
 #include <GyverDS3231.h>
+#endif
 #include "GyverButton.h"
 #include <Wire.h>
 #include <GyverTimer.h>     // Либа таймера
@@ -21,12 +29,13 @@
 #include "MAX17043.h"
 #include <WiFiServer.h>
 #include <WiFiClient.h>
-#include "esp_sleep.h"
-#include <vector>
-#include <stack>
-#include <map>
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
+#ifdef CATOS_SPI_DISPLAY
+#undef OLED_SPI_SPEED
+#define OLED_SPI_SPEED 8000000ul
+#define RES_PIN 17
+#define DC_PIN 16
+#define CS_PIN 5
+#endif
 #include "driver/gpio.h"
 #include "arduino_dino.h"
 #include "bitmaps.h"
@@ -37,44 +46,80 @@
 BleMouse bleMouse("CatOS Mouse", "CatOS", 100);
 DFRobot_BMI160 bmi160;
 
+#ifdef CATOS_NO_RTC
+class FakeRTC {
+public:
+  void begin() {}
+  bool isReset() { return false; }
+  void setBuildTime() {}
+  void setTime(uint8_t s, uint8_t m, uint8_t h, uint8_t d, uint8_t mo, uint16_t y) {}
+  Datime getTime() { return Datime(); }
+};
+#endif
 
-// ЗДЕСЬ МОЖНО НАСТРОИТЬ ПИНЫ, НАПРИМЕР ДЛЯ DIY
-#ifdef CATOS_S3_BUILD
-  //настройки для билда для s3
-  #define PIN_LED    3    //светодиод
-  #define PIN_SDA    8    //sda дисплея/rtc
-  #define PIN_SCL    9    //scl дисплея/rtc
-  
-  //кнопки
-  #define PIN_BTN_L  7
-  #define PIN_BTN_OK 6
-  #define PIN_BTN_R  5
-  #define PIN_PWR    4
+#ifdef CATOS_SPI_DISPLAY
+  #define PIN_UP 26
+  #define PIN_DOWN 21
+  #define PIN_LEFT 14
+  #define PIN_RIGHT 12
+  #define PIN_OK 22
+  #define PIN_LED 2
 #else
-  //настройки для билда для c3
-  #define PIN_LED    20
-  
-  //кнопки
-  #define PIN_BTN_L  21
-  #define PIN_BTN_OK 6
-  #define PIN_BTN_R  10
-  #define PIN_PWR    7
+  #ifdef CATOS_S3_BUILD
+    //настройки для билда для s3
+    #define PIN_LED    3    //светодиод
+    #define PIN_SDA    8    //sda дисплея/rtc
+    #define PIN_SCL    9    //scl дисплея/rtc
+    
+    //кнопки
+    #define PIN_BTN_L  7
+    #define PIN_BTN_OK 6
+    #define PIN_BTN_R  5
+    #define PIN_PWR    4
+  #else
+    //настройки для билда для c3
+    #define PIN_LED    20
+    
+    //кнопки
+    #define PIN_BTN_L  21
+    #define PIN_BTN_OK 6
+    #define PIN_BTN_R  10
+    #define PIN_PWR    7
+  #endif
 #endif
 
 //-----------------------
 // объекты
 Random16 rnd;                           // рандом
+
+#ifndef CATOS_NO_RTC
 GyverDS3231 rtc;                        //часики
+#else
+FakeRTC rtc;
+#endif
+
+#ifdef CATOS_SPI_DISPLAY
+GyverOLED<SSD1306_128x64, OLED_BUFFER, OLED_SPI, CS_PIN, DC_PIN, RES_PIN> oled;
+#else
 GyverOLED<SSD1306_128x64, OLED_BUFFER, OLED_I2C> oled(0x3C); //олег
+#endif
 GyverDBFile db(&LittleFS, "/data.db");              //файл где хранятся настройки
 SettingsGyver sett("CatOS-Watch " FIRMWARE_VERSION, &db); // веб морда
 
 bool ledState = false;
 
+#ifdef CATOS_SPI_DISPLAY
+GButton up(PIN_UP);
+GButton down(PIN_DOWN);
+GButton left(PIN_LEFT);
+GButton ok(PIN_OK);
+GButton right(PIN_RIGHT);
+#else
 GButton left(PIN_BTN_L); 
 GButton ok(PIN_BTN_OK);  
 GButton right(PIN_BTN_R);
 GButton PWR(PIN_PWR);
+#endif
 
 
 
@@ -112,6 +157,21 @@ bool alarmRinging = false; //флаг срабатывания будильни�
 uint8_t watchfaceStyle;
 bool isSleeping = false;
 uint32_t sleepUnixStart = 0;  //время засыпания в unix формате
+#ifdef CATOS_SPI_DISPLAY
+#define BATTERY_PIN 34
+#define REF_VOLTAGE 3.3
+#define ADC_RESOLUTION 12
+#define VOLTAGE_DIVIDER 2.0
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+int getBattery() {
+  int adcValue = analogRead(BATTERY_PIN);
+  float voltage = (adcValue / (pow(2, ADC_RESOLUTION) - 1)) * REF_VOLTAGE * VOLTAGE_DIVIDER;
+  int percent = mapFloat(voltage, 2.32, 3.45, 0, 100);
+  return constrain(percent, 0, 100);
+}
+#endif
 // Для CatOsGotchi
 struct PetState {
   String name;         // имя
@@ -158,17 +218,27 @@ void reset_buttons() {
   ok.resetStates();
   left.resetStates();
   right.resetStates();
+#ifdef CATOS_SPI_DISPLAY
+  up.resetStates();
+  down.resetStates();
+#endif
 }
 
 void buttons_tick() {
   right.tick();
   left.tick();
   ok.tick();
+#ifdef CATOS_SPI_DISPLAY
+  up.tick();
+  down.tick();
+#endif
 }
 
 void exit() {
   reset_buttons();
+#ifndef CATOS_SPI_DISPLAY
   PWR.resetStates();
+#endif
 }
 
 void settings_menu() {
@@ -3276,8 +3346,9 @@ void air_mouse_app() {
 
   while (true) {
     buttons_tick();
+#ifndef CATOS_SPI_DISPLAY
     PWR.tick(); 
-
+#endif
     if (ok.isHold()) {
       oled.clear();
       ui_rama("Выход...", true, true, false);
@@ -3297,6 +3368,7 @@ void air_mouse_app() {
         needRedraw = true;
     }
     //потом переименую кнопку
+#ifndef CATOS_SPI_DISPLAY
     if (PWR.isDouble() && isConnected) {
         bleMouse.press(MOUSE_RIGHT);
         delay(30); 
@@ -3307,7 +3379,9 @@ void air_mouse_app() {
         needRedraw = true;
         isActive = false; valX = 0; valY = 0;
     }
+#endif
 
+#ifndef CATOS_SPI_DISPLAY
     if (PWR.state()) {
         if (btnPressTime == 0) btnPressTime = millis();
         if (millis() - btnPressTime > MOVE_DELAY) {
@@ -3324,6 +3398,7 @@ void air_mouse_app() {
             needRedraw = true;
         }
     }
+#endif
 
     if (needRedraw || (!isConnected && millis() % 500 == 0)) {
         oled.clear();
@@ -3509,7 +3584,10 @@ void battery_info() {
   }
 }
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+#ifdef ARDUINO_USB_CDC_ON_BOOT
+  // delay to allow serial to start
+  delay(1000);
+#endif
   Serial.begin(115200);
   delay(2000); 
   
@@ -3522,6 +3600,9 @@ void setup() {
   #endif
   Serial.println("[log] conf. pins");
   
+  #ifdef CATOS_SPI_DISPLAY
+    // SPI doesn't need Wire for display
+#else
   #ifdef CATOS_S3_BUILD
     Wire.begin(PIN_SDA, PIN_SCL);
     Wire.setClock(100000); 
@@ -3529,8 +3610,10 @@ void setup() {
     Serial.println("[log] start wire c3");
     Wire.begin(); 
   #endif
+#endif
   
   delay(100);
+#ifndef CATOS_SPI_DISPLAY
   Serial.println("[log] init MAX17043");
   if (FuelGauge.begin()) {
     FuelGauge.quickstart();
@@ -3538,6 +3621,8 @@ void setup() {
   } else {
     Serial.println("[log] MAX17043 not found");
   }
+#endif
+#ifndef CATOS_SPI_DISPLAY
   Wire.beginTransmission(0x3C);
   if (Wire.endTransmission() != 0) {
       Serial.println("[log] oled not found");
@@ -3556,6 +3641,7 @@ void setup() {
   } else {
       Serial.println("[log] oled found");
   }
+#endif
   oled.init();
   
   
@@ -3578,6 +3664,7 @@ void setup() {
   oled.init();
   oled.clear();
   oled.setContrast(255);
+  #ifndef CATOS_SPI_DISPLAY
   // кфг сна
   gpio_config_t pwr_config;
   pwr_config.pin_bit_mask = (1ULL << GPIO_NUM_7);
@@ -3590,7 +3677,8 @@ void setup() {
   // для esp32-c3 используем gpio wakeup
   esp_sleep_enable_gpio_wakeup();
   gpio_wakeup_enable(GPIO_NUM_7, GPIO_INTR_LOW_LEVEL);
-  // rtc
+#endif
+  
   Datime dt = rtc.getTime();
   // random
   int seed = dt.hour + dt.second + dt.day;
@@ -3601,6 +3689,7 @@ void setup() {
   digitalWrite(PIN_LED, LOW);
   Wire.setClock(400000);
 }
+#ifndef CATOS_SPI_DISPLAY
 void wakeFromSleep() {
   //врубаем дисплей
   oled.setPower(true);
@@ -3622,7 +3711,6 @@ void wakeFromSleep() {
   
   //перерисовываем
   drawWatchFace();
-  
 }
 
 void enterLightSleep() {
@@ -3644,7 +3732,6 @@ void enterLightSleep() {
     alarmTime.year = now.year;
     
     uint32_t alarmUnix = timeToUnix(alarmTime);
-    
     if (alarmUnix > currentUnix) {
       timeToAlarm = (alarmUnix - currentUnix) * 1000000;
     }
@@ -3672,19 +3759,19 @@ void enterLightSleep() {
   // если будильник активен, устанавливаем таймер пробуждения
   if (alarmActive && timeToAlarm > 0) {
     esp_sleep_enable_timer_wakeup(timeToAlarm);
-    Serial.printf("Таймер сна установлен на: %d секунд\n", timeToAlarm / 1000000);
   }
   
   // флаг
   isSleeping = true;
-  
   Serial.flush();
   
   // переходим в light sleep
   esp_light_sleep_start();
   
+  //проснулись
   wakeFromSleep();
 }
+#endif
 void checkAlarm() {
   if (!alarmActive || alarmRinging) return;
   
@@ -3707,7 +3794,9 @@ void checkAlarm() {
     alarmConfig.triggered = true;
     
     if (isSleeping) {
+#ifndef CATOS_SPI_DISPLAY
       wakeFromSleep();
+#endif
     }
   }
 }
@@ -3747,6 +3836,7 @@ struct CatBlock {
     String type; 
 };
 
+template <typename OLED_TYPE>
 class CatSharpInterpreter {
 private:
     std::map<String, Variable> variables;
@@ -3761,7 +3851,7 @@ private:
     uint8_t cnt_click_right = 0;
     bool buf_hold_ok = false, buf_hold_left = false, buf_hold_right = false;
     
-    GyverOLED<SSD1306_128x64, OLED_BUFFER, OLED_I2C>* _oled;
+    OLED_TYPE* _oled;
 
     void serviceButtons() {
         right.tick(); left.tick(); ok.tick();
@@ -3890,7 +3980,7 @@ private:
         Variable res;
 
         if (t.type >= OP_TIME_H && t.type <= OP_DATE_W) {
-            Datime dt = rtc.getTime();
+            auto dt = rtc.getTime();
             res.type = 0; // INT
             if (t.type == OP_TIME_H) res.intVal = dt.hour;
             else if (t.type == OP_TIME_M) res.intVal = dt.minute;
@@ -3974,7 +4064,7 @@ private:
     }
 
 public:
-    CatSharpInterpreter(GyverOLED<SSD1306_128x64, OLED_BUFFER, OLED_I2C>* oled) {
+    CatSharpInterpreter(OLED_TYPE* oled) {
         _oled = oled;
     }
 
@@ -4459,7 +4549,7 @@ void custom_apps_menu() {
                     
                     setCpuFrequencyMhz(160); 
                     
-                    CatSharpInterpreter interp(&oled);
+                    CatSharpInterpreter<decltype(oled)> interp(&oled);
                     interp.load(script);
                     oled.clear(); 
                     interp.run();
@@ -4486,6 +4576,18 @@ void custom_apps_menu() {
     }
 }
 void loop() {
+#ifdef CATOS_SPI_DISPLAY
+  static bool first_run = true;
+  if (first_run) {
+    first_run = false;
+    open_graphical_main();
+  }
+  buttons_tick();
+
+  if (ok.isClick()) {
+    open_graphical_main();
+  }
+#else
   buttons_tick();
   PWR.tick();
 
@@ -4528,9 +4630,10 @@ void loop() {
     lastUpdate = millis();
   }
   
-  // открытие главного меню по ок
   if (ok.isClick() && !alarmRinging) {
     open_graphical_main();
+    // открытие главного меню по ок
     drawWatchFace();
   }
+#endif
 }
