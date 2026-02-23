@@ -36,6 +36,7 @@ extern void air_mouse_app();
 // WiFi
 extern void create_settings();   // Загрузка файлов
 extern void time_sync_menu();    // Синхронизация времени
+extern void app_store_menu();
 
 void open_graphical_games();
 void open_graphical_wifi();
@@ -64,9 +65,10 @@ GraphMenu data_GamesMenu = {"Игры", 40, items_Games, sizeof(items_Games)/siz
 GraphMenuItem items_Wifi[] = {
   {"Загрузка", nullptr,           create_settings},
   {"Синхр.Вр", nullptr,           time_sync_menu},
+  {"Магазин",  nullptr,           app_store_menu},
   {"Назад",    exit_bitmap_24x24, nullptr}
 };
-GraphMenu data_WifiMenu = {"WiFi", 35, items_Wifi, 3};
+GraphMenu data_WifiMenu = {"WiFi", 35, items_Wifi, sizeof(items_Wifi)/sizeof(GraphMenuItem)};
 
 
 // --- 3. МЕНЮ УТИЛИТ ---

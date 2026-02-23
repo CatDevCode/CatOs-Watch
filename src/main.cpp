@@ -29,6 +29,8 @@
 #include "MAX17043.h"
 #include <WiFiServer.h>
 #include <WiFiClient.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #ifdef CATOS_SPI_DISPLAY
 #undef OLED_SPI_SPEED
 #define OLED_SPI_SPEED 8000000ul
@@ -60,8 +62,8 @@ public:
 #ifdef CATOS_SPI_DISPLAY
   #define PIN_UP 26
   #define PIN_DOWN 21
-  #define PIN_LEFT 14
-  #define PIN_RIGHT 12
+  #define PIN_LEFT 12
+  #define PIN_RIGHT 14
   #define PIN_OK 22
   #define PIN_LED 2
 #else
@@ -4374,6 +4376,227 @@ void drawAppWidget(int x, CustomApp& app, bool isCenter) {
         
         oled.setCursorXY(textX, y + 34);
         oled.print(app.name);
+    }
+}
+// можно тут указать свой репо для своих приложений. но стандартный будет использоваться в релизах. так что надо перекомпилировать прошивку
+#define GITHUB_USER "CatDevCode" // пользователь
+#define GITHUB_REPO "CatOs-Apps" // имя репо с приложениями
+#define GITHUB_BRANCH "main"     // ветка
+#define GITHUB_BASE_URL "https://raw.githubusercontent.com/" GITHUB_USER "/" GITHUB_REPO "/" GITHUB_BRANCH "/"
+
+struct StoreApp {
+    String name;
+    String filename;
+    String description;
+    bool installed;
+};
+
+// скачивание файла с github в littleFS
+bool downloadCatFile(const String& filename) {
+    String url = String(GITHUB_BASE_URL) + "apps/" + filename;
+    
+    HTTPClient http;
+    http.begin(url);
+    http.setTimeout(15000);
+    int httpCode = http.GET();
+    
+    if (httpCode == HTTP_CODE_OK) {
+        String payload = http.getString();
+        
+        File file = LittleFS.open("/" + filename, "w");
+        if (file) {
+            file.print(payload);
+            file.close();
+            http.end();
+            return true;
+        }
+    }
+    
+    http.end();
+    return false;
+}
+
+
+void app_store_menu() {
+    reset_buttons();
+    oled.clear();
+    ui_rama("App Store", true, true, false, false);
+    oled.setCursor(5, 3);
+    oled.print("Подключение WiFi...");
+    oled.update();
+    
+    if (!connectToWiFi()) {
+        oled.clear();
+        ui_rama("App Store", true, true, false, false);
+        oled.setCursor(15, 4);
+        oled.print("Ошибка WiFi!");
+        oled.update();
+        delay(2000);
+        stopWiFi();
+        exit();
+        return;
+    }
+    
+    oled.clear();
+    ui_rama("App Store", true, true, false, false);
+    oled.setCursor(5, 3);
+    oled.print("Загрузка репо...");
+    oled.update();
+    
+    String indexUrl = String(GITHUB_BASE_URL) + "index.json";
+    HTTPClient http;
+    http.begin(indexUrl);
+    http.setTimeout(10000);
+    int httpCode = http.GET();
+    
+    if (httpCode != HTTP_CODE_OK) {
+        oled.clear();
+        ui_rama("App Store", true, true, false, false);
+        oled.setCursor(10, 3);
+        oled.print("Ошибка сети:");
+        oled.print(httpCode);
+        oled.update();
+        delay(2000);
+        stopWiFi();
+        exit();
+        return;
+    }
+    
+    String payload = http.getString();
+    http.end();
+    
+    JsonDocument doc;
+    deserializeJson(doc, payload);
+    JsonArray apps = doc["apps"].as<JsonArray>();
+    int appCount = apps.size();
+    
+    if (appCount == 0) {
+        oled.clear();
+        ui_rama("App Store", true, true, false, false);
+        oled.setCursor(10, 3);
+        oled.print("Репозиторий пуст");
+        oled.update();
+        delay(2000);
+        stopWiFi();
+        exit();
+        return;
+    }
+    
+    StoreApp* storeApps = new StoreApp[appCount];
+    for (int i = 0; i < appCount; i++) {
+        storeApps[i].name = apps[i]["name"].as<String>();
+        storeApps[i].filename = apps[i]["file"].as<String>();
+        storeApps[i].description = apps[i]["desc"] | "";
+        storeApps[i].installed = LittleFS.exists("/" + storeApps[i].filename);
+    }
+    
+    int selected = 0;
+    int topItem = 0;
+    const int VISIBLE = 4;
+    bool needRedraw = true;
+    
+    while (true) {
+        buttons_tick();
+        
+        if (needRedraw) {
+            needRedraw = false;
+            oled.clear();
+            ui_rama("App Store", true, true, false, false);
+            
+            // Отрисовка списка
+            for (int i = 0; i < VISIBLE && (i + topItem) < appCount; i++) {
+                int idx = i + topItem;
+                int y = 16 + (i * 8);
+                
+                if (idx == selected) {
+                    oled.setCursorXY(2, y);
+                    oled.print(">");
+                }
+                
+                oled.setCursorXY(10, y);
+                if (storeApps[idx].installed) oled.print("[V] ");
+                else oled.print("[ ] ");
+                
+                String name = storeApps[idx].name;
+                if (name.length() > 15) name = name.substring(0, 14) + "..";
+                oled.print(name);
+            }
+            
+            oled.fastLineH(54, 0, 127, OLED_STROKE);
+            oled.setCursorXY(4, 56);
+            if (storeApps[selected].installed) oled.print("OK: Удалить");
+            else oled.print("OK: Установить");
+            
+            if (appCount > VISIBLE) {
+                int barH = (38);
+                if (appCount > 0) barH = (VISIBLE * 38) / appCount;
+                int barY = 16 + (selected * (38 - barH)) / (appCount - 1);
+                oled.fastLineV(126, barY, barY + barH, OLED_STROKE);
+            }
+            oled.update();
+        }
+        
+#ifdef CATOS_SPI_DISPLAY
+        if (down.isClick() || (down.isHold() && down.isStep())) {
+            if (selected < appCount - 1) {
+                selected++;
+                if (selected >= topItem + VISIBLE) topItem = selected - VISIBLE + 1;
+                needRedraw = true;
+            }
+        }
+        
+        if (up.isClick() || (up.isHold() && up.isStep())) {
+            if (selected > 0) {
+                selected--;
+                if (selected < topItem) topItem = selected;
+                needRedraw = true;
+            }
+        }
+#else
+        if (right.isClick() || (right.isHold() && right.isStep())) {
+            if (selected < appCount - 1) {
+                selected++;
+                if (selected >= topItem + VISIBLE) topItem = selected - VISIBLE + 1;
+                needRedraw = true;
+            }
+        }
+        
+        if (left.isClick() || (left.isHold() && left.isStep())) {
+            if (selected > 0) {
+                selected--;
+                if (selected < topItem) topItem = selected;
+                needRedraw = true;
+            }
+        }
+#endif
+        
+        if (ok.isClick()) {
+            oled.clear();
+            ui_rama("App Store", true, true, false, false);
+            oled.setCursorXY(10, 30);
+            if (storeApps[selected].installed) {
+                oled.print("Удаление...");
+                oled.update();
+                LittleFS.remove("/" + storeApps[selected].filename);
+                storeApps[selected].installed = false;
+            } else {
+                oled.print("Загрузка...");
+                oled.update();
+                if (downloadCatFile(storeApps[selected].filename)) {
+                    storeApps[selected].installed = true;
+                }
+            }
+            delay(800);
+            needRedraw = true;
+        }
+        
+        if (ok.isHold()) {
+            delete[] storeApps;
+            stopWiFi();
+            exit();
+            return;
+        }
+        yield();
     }
 }
 int getCatFiles() {
