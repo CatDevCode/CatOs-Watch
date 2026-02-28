@@ -4624,7 +4624,8 @@ void drawAppWidget(int x, CustomApp& app, bool isCenter) {
 #define GITHUB_USER "CatDevCode"
 #define GITHUB_REPO "CatOs-Apps"
 #define GITHUB_BRANCH "main"
-#define GITHUB_API_URL "https://api.github.com/repos/" GITHUB_USER "/" GITHUB_REPO "/git/refs/heads/" GITHUB_BRANCH
+#define GITHUB_RELEASE_URL "https://github.com/" GITHUB_USER "/" GITHUB_REPO "/releases/download/" GITHUB_BRANCH "/index.json"
+#define GITHUB_RAW_URL "https://raw.githubusercontent.com/" GITHUB_USER "/" GITHUB_REPO "/" GITHUB_BRANCH "/"
 
 struct StoreApp {
     String name;
@@ -4633,9 +4634,15 @@ struct StoreApp {
     bool installed;
 };
 
-// скачивание файла с github releases в littleFS
-bool downloadCatFile(const String& filename, const String& baseUrl) {
-    String url = baseUrl + "apps/" + filename;
+// скачивание .cat файла с github raw в LittleFS
+bool downloadCatFile(const String& filepath, const String& baseUrl) {
+    // filepath может быть "apps/hello.cat" или просто "hello.cat"
+    String url = baseUrl + filepath;
+    
+    // Извлекаем только имя файла для сохранения в LittleFS
+    String saveName = filepath;
+    int lastSlash = filepath.lastIndexOf('/');
+    if (lastSlash >= 0) saveName = filepath.substring(lastSlash + 1);
     
     HTTPClient http;
     http.begin(url);
@@ -4645,7 +4652,7 @@ bool downloadCatFile(const String& filename, const String& baseUrl) {
     if (httpCode == HTTP_CODE_OK) {
         String payload = http.getString();
         
-        File file = LittleFS.open("/" + filename, "w");
+        File file = LittleFS.open("/" + saveName, "w");
         if (file) {
             file.print(payload);
             file.close();
@@ -4990,57 +4997,19 @@ void app_store_menu() {
         return;
     }
     
-    // Получаем последний коммит из ветки main
-    oled.clear();
-    ui_rama("App Store", true, true, false, false);
-    oled.setCursor(5, 3);
-    oled.print("Получение коммита...");
-    oled.update();
-    
-    HTTPClient http;
-    http.begin(GITHUB_API_URL);
-    http.setTimeout(10000);
-    http.addHeader("User-Agent", "CatOS-Watch");
-    int httpCode = http.GET();
-    
-    if (httpCode != HTTP_CODE_OK) {
-        oled.clear();
-        ui_rama("App Store", true, true, false, false);
-        oled.setCursor(10, 3);
-        oled.print("Ошибка API:");
-        oled.print(httpCode);
-        oled.update();
-        delay(2000);
-        stopWiFi();
-        exit();
-        return;
-    }
-    
-    String payload = http.getString();
-    http.end();
-    
-    // Парсим JSON ответ - получаем SHA коммита
-    JsonDocument doc;
-    deserializeJson(doc, payload);
-    
-    String commitSha = doc["object"]["sha"].as<String>();
-    
-    // Формируем базовый URL для raw файлов
-    String rawBaseUrl = String("https://raw.githubusercontent.com/") + GITHUB_USER + "/" + GITHUB_REPO + "/" + commitSha + "/";
+    String rawBaseUrl = GITHUB_RAW_URL;
     
     oled.clear();
     ui_rama("App Store", true, true, false, false);
     oled.setCursor(5, 3);
-    oled.print("Коммит: " + commitSha.substring(0, 7));
-    oled.setCursor(5, 4);
     oled.print("Загрузка index.json...");
     oled.update();
     
-    // Скачиваем index.json из ветки main
-    String indexUrl = rawBaseUrl + "index.json";
-    http.begin(indexUrl);
+    HTTPClient http;
+    http.begin(GITHUB_RELEASE_URL);
     http.setTimeout(10000);
-    httpCode = http.GET();
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    int httpCode = http.GET();
     
     if (httpCode != HTTP_CODE_OK) {
         oled.clear();
@@ -5055,9 +5024,10 @@ void app_store_menu() {
         return;
     }
     
-    payload = http.getString();
+    String payload = http.getString();
     http.end();
     
+    JsonDocument doc;
     deserializeJson(doc, payload);
     
     if (!doc.containsKey("apps")) {
@@ -5092,7 +5062,10 @@ void app_store_menu() {
         storeApps[i].name = apps[i]["name"].as<String>();
         storeApps[i].filename = apps[i]["file"].as<String>();
         storeApps[i].description = apps[i]["desc"] | "";
-        storeApps[i].installed = LittleFS.exists("/" + storeApps[i].filename);
+        String localName = storeApps[i].filename;
+        int sl = localName.lastIndexOf('/');
+        if (sl >= 0) localName = localName.substring(sl + 1);
+        storeApps[i].installed = LittleFS.exists("/" + localName);
     }
     
     int selected = 0;
@@ -5182,7 +5155,10 @@ void app_store_menu() {
             if (storeApps[selected].installed) {
                 oled.print("Удаление...");
                 oled.update();
-                LittleFS.remove("/" + storeApps[selected].filename);
+                String delName = storeApps[selected].filename;
+                int sl = delName.lastIndexOf('/');
+                if (sl >= 0) delName = delName.substring(sl + 1);
+                LittleFS.remove("/" + delName);
                 storeApps[selected].installed = false;
             } else {
                 oled.print("Загрузка...");
