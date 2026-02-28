@@ -31,11 +31,16 @@ extern void calc();
 extern void stopwatch();
 extern void timer();
 extern void alarm_menu();
+extern void two_factor_app();
 extern void battery_info();
 extern void air_mouse_app();
+#ifndef CATOS_NO_RTC
+extern void set_time_manual_menu();
+#endif
 // WiFi
 extern void create_settings();   // Загрузка файлов
 extern void time_sync_menu();    // Синхронизация времени
+extern void ntp_sync_menu();
 extern void app_store_menu();
 
 void open_graphical_games();
@@ -65,6 +70,7 @@ GraphMenu data_GamesMenu = {"Игры", 40, items_Games, sizeof(items_Games)/siz
 GraphMenuItem items_Wifi[] = {
   {"Загрузка", nullptr,           create_settings},
   {"Синхр.Вр", nullptr,           time_sync_menu},
+  {"NTP",      nullptr,           ntp_sync_menu},
   {"Магазин",  nullptr,           app_store_menu},
   {"Назад",    exit_bitmap_24x24, nullptr}
 };
@@ -82,6 +88,10 @@ GraphMenuItem items_Utils[] = {
   {"Секундом.",stopwatch_icon_24x24,   stopwatch},
   {"Таймер",   timer_icon_24x24,       timer},
   {"Будильн.", alarm_icon_menu_24x24,  alarm_menu},
+#ifndef CATOS_NO_RTC
+  {"Уст.Врем", nullptr,                set_time_manual_menu},
+#endif
+  {"2FA",      shield_24x24,           two_factor_app},
   {"Назад",    exit_bitmap_24x24,      nullptr}
 };
 GraphMenu data_UtilsMenu = {"Утилиты", 60, items_Utils, sizeof(items_Utils)/sizeof(GraphMenuItem)};

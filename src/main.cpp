@@ -32,15 +32,19 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #ifdef CATOS_SPI_DISPLAY
+
 #undef OLED_SPI_SPEED
 #define OLED_SPI_SPEED 8000000ul
 #define RES_PIN 17
 #define DC_PIN 16
 #define CS_PIN 5
+
 #endif
 #include "driver/gpio.h"
 #include "arduino_dino.h"
 #include "bitmaps.h"
+#include <sha1.h>
+#include <TOTP.h>
 #include "custom_app.h"
 #define USE_NIMBLE
 #include <BleMouse.h>
@@ -54,7 +58,7 @@ public:
   void begin() {}
   bool isReset() { return false; }
   void setBuildTime() {}
-  void setTime(uint8_t s, uint8_t m, uint8_t h, uint8_t d, uint8_t mo, uint16_t y) {}
+  void setTime(uint16_t y, uint8_t mo, uint8_t d, uint8_t h, uint8_t m, uint8_t s) {}
   Datime getTime() { return Datime(); }
 };
 #endif
@@ -214,7 +218,11 @@ DB_KEYS(
   PET_HUNGER,
   PET_HAPPINESS,
   PET_LAST_UPDATE,
-  PET_LAST_VISIT
+  PET_LAST_VISIT,
+  TOTP_SECRET,
+  TOTP_SECRET_2,
+  TOTP_UTC_OFFSET,
+  TOTP_PIN
 );
 void reset_buttons() {
   ok.resetStates();
@@ -1511,6 +1519,83 @@ void stopWiFi() {
   WiFi.mode(WIFI_OFF);
   Serial.println("WiFi completely stopped");
 }
+
+void ntp_sync_menu() {
+  reset_buttons();
+  oled.clear();
+  ui_rama("NTP Sync", true, true, false, false);
+  oled.setCursor(5, 3);
+  oled.print("Подключение WiFi...");
+  oled.update();
+
+  if (!connectToWiFi()) {
+    oled.clear();
+    ui_rama("NTP Sync", true, true, false, false);
+    oled.setCursor(15, 4);
+    oled.print("Ошибка WiFi!");
+    oled.update();
+    delay(2000);
+    stopWiFi();
+    exit(); return;
+  }
+
+  oled.clear();
+  ui_rama("NTP Sync", true, true, false, false);
+  oled.setCursor(5, 3);
+  oled.print("Получение NTP...");
+  oled.update();
+
+  int tzOffset = db[kk::TOTP_UTC_OFFSET].toInt();
+  configTime(tzOffset * 3600, 0, "pool.ntp.org", "time.nist.gov");
+
+  struct tm timeinfo;
+  bool success = false;
+  for (int i = 0; i < 20; i++) {
+    if (getLocalTime(&timeinfo, 500)) {
+      success = true;
+      break;
+    }
+    delay(250);
+  }
+
+  if (success) {
+    #ifndef CATOS_NO_RTC
+    rtc.setTime(
+      timeinfo.tm_year + 1900,
+      timeinfo.tm_mon + 1,
+      timeinfo.tm_mday,
+      timeinfo.tm_hour,
+      timeinfo.tm_min,
+      timeinfo.tm_sec
+    );
+    #endif
+
+    oled.clear();
+    ui_rama("NTP Sync", true, true, false, false);
+    oled.setScale(1);
+    oled.setCursor(15, 3);
+    oled.print("Синхронизировано!");
+    oled.setCursor(25, 5);
+    char buf[20];
+    sprintf(buf, "%02d:%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    oled.print(buf);
+    oled.setCursor(20, 6);
+    sprintf(buf, "%02d.%02d.%04d", timeinfo.tm_mday, timeinfo.tm_mon + 1, timeinfo.tm_year + 1900);
+    oled.print(buf);
+    oled.update();
+    delay(2500);
+  } else {
+    oled.clear();
+    ui_rama("NTP Sync", true, true, false, false);
+    oled.setCursor(10, 3);
+    oled.print("Ошибка NTP!");
+    oled.update();
+    delay(2000);
+  }
+
+  stopWiFi();
+  exit();
+}
 String validatePetName(const String& name) {
   if (name.length() == 0) {
     return "CatOsGotchi";
@@ -1584,6 +1669,16 @@ void build(sets::Builder& b) { // страница веб морды
     b.Switch(kk::WATCHFACE_STYLE, "Установить круглый циферблат", &watch_style_enabled);
     b.Slider(kk::PET_HUNGER, "PET HUNDER DEBUG", 10, 100, 1, "", nullptr, sets::Colors::Blue);
     b.Slider(kk::PET_HAPPINESS, "PET HAPPINESS DEBUG", 10, 100, 1, "", nullptr, sets::Colors::Blue);
+  }
+  {
+      sets::Group g(b, "2FA (TOTP)");
+      b.Input(kk::TOTP_SECRET, "Ключ 1 (BASE32)");
+      b.Input(kk::TOTP_SECRET_2, "Ключ 2 (BASE32)");
+      b.Slider(kk::TOTP_UTC_OFFSET, "Часовой пояс (UTC+)", -12, 14, 1, "", nullptr, sets::Colors::Blue);
+      if(b.Button("Сохранить 2FA")) {
+        db.update();
+        b.reload();
+      }
   }
   {
       sets::Group g(b, "Управление");
@@ -1674,6 +1769,10 @@ void initSettings() {
   if (!db.has(kk::PET_HAPPINESS)) db.init(kk::PET_HAPPINESS, 80);
   if (!db.has(kk::PET_LAST_UPDATE)) db.init(kk::PET_LAST_UPDATE, timeToUnix(rtc.getTime()));
   if (!db.has(kk::PET_LAST_VISIT)) db.init(kk::PET_LAST_VISIT, timeToUnix(rtc.getTime()));
+  if (!db.has(kk::TOTP_SECRET)) db.init(kk::TOTP_SECRET, "");
+  if (!db.has(kk::TOTP_SECRET_2)) db.init(kk::TOTP_SECRET_2, "");
+  if (!db.has(kk::TOTP_UTC_OFFSET)) db.init(kk::TOTP_UTC_OFFSET, 3);
+  if (!db.has(kk::TOTP_PIN)) db.init(kk::TOTP_PIN, "");
   db.update();
   loadPetState();
   loadAlarmSettings();
@@ -1770,6 +1869,149 @@ String getParamValue(String body, String param) {
     
     return body.substring(startIndex, endIndex);
 }
+
+#ifndef CATOS_NO_RTC
+void set_time_manual_menu() {
+  Datime now = rtc.getTime();
+  uint8_t hours = now.hour;
+  uint8_t minutes = now.minute;
+  uint8_t day = now.day;
+  uint8_t month = now.month;
+  uint16_t year = now.year;
+  
+  //0=часы, 1=минуты, 2=день, 3=месяц, 4=год
+  uint8_t editField = 0;
+  bool needRedraw = true;
+  unsigned long lastInput = millis();
+  
+  const uint8_t daysInMonth[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+  
+  reset_buttons();
+  
+  while (true) {
+    buttons_tick();
+    
+    if (needRedraw) {
+      needRedraw = false;
+      
+      oled.clear();
+      ui_rama("Уст. времени", true, true, false, false);
+      
+
+      oled.setScale(2);
+      oled.setCursor(25, 2);
+      
+      if (editField == 0) oled.invertText(true);
+      if (hours < 10) oled.print("0");
+      oled.print(hours);
+      if (editField == 0) oled.invertText(false);
+      
+      oled.print(":");
+      
+      if (editField == 1) oled.invertText(true);
+      if (minutes < 10) oled.print("0");
+      oled.print(minutes);
+      if (editField == 1) oled.invertText(false);
+      
+
+      oled.setScale(1);
+      oled.setCursor(15, 5);
+      
+      if (editField == 2) oled.invertText(true);
+      if (day < 10) oled.print("0");
+      oled.print(day);
+      if (editField == 2) oled.invertText(false);
+      
+      oled.print(".");
+      
+      if (editField == 3) oled.invertText(true);
+      if (month < 10) oled.print("0");
+      oled.print(month);
+      if (editField == 3) oled.invertText(false);
+      
+      oled.print(".");
+      
+      if (editField == 4) oled.invertText(true);
+      oled.print(year);
+      if (editField == 4) oled.invertText(false);
+      
+      oled.setCursor(0, 7);
+      oled.print("OK-выбор  Удр-сохр");
+      
+      oled.update();
+    }
+    
+    if (left.isClick() || (left.isHold() && millis() - lastInput > 200)) {
+      switch (editField) {
+        case 0: hours = (hours + 1) % 24; break;
+        case 1: minutes = (minutes + 1) % 60; break;
+        case 2: {
+          uint8_t maxDay = daysInMonth[month - 1];
+          day = (day % maxDay) + 1;
+          break;
+        }
+        case 3: month = (month % 12) + 1; break;
+        case 4: year++; break;
+      }
+      needRedraw = true;
+      lastInput = millis();
+    }
+    
+    if (right.isClick() || (right.isHold() && millis() - lastInput > 200)) {
+      switch (editField) {
+        case 0: hours = (hours == 0) ? 23 : hours - 1; break;
+        case 1: minutes = (minutes == 0) ? 59 : minutes - 1; break;
+        case 2: {
+          uint8_t maxDay = daysInMonth[month - 1];
+          day = (day == 1) ? maxDay : day - 1;
+          break;
+        }
+        case 3: month = (month == 1) ? 12 : month - 1; break;
+        case 4: if (year > 2020) year--; break;
+      }
+      needRedraw = true;
+      lastInput = millis();
+    }
+    
+    if (ok.isClick()) {
+      editField = (editField + 1) % 5;
+      needRedraw = true;
+    }
+    
+    if (ok.isHold()) {
+      Wire.setClock(100000);
+      rtc.setTime(year, month, day, hours, minutes, 0);
+      delay(50);
+      
+
+      oled.clear();
+      ui_rama("Готово!", true, true, false, false);
+      oled.setScale(1);
+      oled.setCursor(10, 3);
+      oled.print("Время сохранено");
+      oled.setCursor(25, 5);
+      if (hours < 10) oled.print("0");
+      oled.print(hours);
+      oled.print(":");
+      if (minutes < 10) oled.print("0");
+      oled.print(minutes);
+      oled.setCursor(15, 6);
+      if (day < 10) oled.print("0");
+      oled.print(day);
+      oled.print(".");
+      if (month < 10) oled.print("0");
+      oled.print(month);
+      oled.print(".");
+      oled.print(year);
+      oled.update();
+      delay(1500);
+      return;
+    }
+    
+    delay(50);
+  }
+}
+#endif
 
 void time_sync_menu() {
     String ssid = db[kk::wifi_ssid];
@@ -1905,7 +2147,7 @@ void time_sync_menu() {
                             int second = getParamValue(body, "second").toInt();
                             
                             if(year > 2000 && month >= 1 && month <= 12) {
-                                rtc.setTime(second, minute, hour, day, month, year);
+                                rtc.setTime(year, month, day, hour, minute, second);
                                 timeSynced = true;
                                 
                                 oled.clear();
@@ -4416,6 +4658,317 @@ bool downloadCatFile(const String& filename) {
     return false;
 }
 
+int base32_decode(const char* input, uint8_t* output) {
+  int length = 0;
+  uint32_t buffer = 0;
+  int bufferBits = 0;
+  while (*input) {
+    char c = *input++;
+    int val = -1;
+    if (c >= 'A' && c <= 'Z') val = c - 'A';
+    else if (c >= 'a' && c <= 'z') val = c - 'a';
+    else if (c >= '2' && c <= '7') val = c - '2' + 26;
+    else if (c == ' ' || c == '\r' || c == '\n' || c == '\t') continue;
+    else if (c == '=') break;
+    if (val == -1) continue;
+
+    buffer <<= 5;
+    buffer |= val;
+    bufferBits += 5;
+    while (bufferBits >= 8) {
+      output[length++] = (buffer >> (bufferBits - 8)) & 0xFF;
+      bufferBits -= 8;
+    }
+  }
+  return length;
+}
+
+//ввод PIN из кнопок. возвращает строку из 4 символов (L/R/O/U/D)
+String totp_pin_input(bool isSetup) {
+  String pin = "";
+  bool needRedraw = true;
+  reset_buttons();
+
+  while (pin.length() < 4) {
+    buttons_tick();
+
+    if (needRedraw) {
+      needRedraw = false;
+      oled.clear();
+      ui_rama(isSetup ? "Новый PIN" : "Введите PIN", true, true, false, false);
+
+      oled.setScale(1);
+      oled.setCursor(10, 3);
+      if (isSetup) {
+        oled.print("Нажмите 4 кнопки:");
+      } else {
+        oled.print("Введите пароль:");
+      }
+
+      oled.setScale(2);
+      int startX = 30;
+      for (int i = 0; i < 4; i++) {
+        oled.setCursorXY(startX + i * 20, 34);
+        if (i < (int)pin.length()) {
+          char c = pin.charAt(i);
+          if (c == 'L') oled.print("<");
+          else if (c == 'R') oled.print(">");
+          else if (c == 'U') oled.print("^");
+          else if (c == 'D') oled.print("v");
+          else oled.print("*");
+        } else {
+          oled.print("_");
+        }
+      }
+
+      oled.setScale(1);
+      oled.setCursor(0, 7);
+#ifdef CATOS_SPI_DISPLAY
+      oled.print("^ v < OK >");
+#else
+      oled.print("<  OK  >");
+#endif
+      oled.update();
+    }
+
+    if (left.isClick()) { pin += 'L'; needRedraw = true; }
+    if (right.isClick()) { pin += 'R'; needRedraw = true; }
+    if (ok.isClick()) { pin += 'O'; needRedraw = true; }
+#ifdef CATOS_SPI_DISPLAY
+    if (up.isClick()) { pin += 'U'; needRedraw = true; }
+    if (down.isClick()) { pin += 'D'; needRedraw = true; }
+#endif
+
+    if (ok.isHold()) { return ""; } //отмена
+    delay(30);
+  }
+
+  delay(200);
+  return pin;
+}
+
+String totp_encrypt(const String& data, const String& pin) {
+  String hex = "E:";
+  for (int i = 0; i < (int)data.length(); i++) {
+    uint8_t enc = data.charAt(i) ^ pin.charAt(i % pin.length());
+    char buf[3];
+    sprintf(buf, "%02X", enc);
+    hex += buf;
+  }
+  return hex;
+}
+
+String totp_decrypt(const String& data, const String& pin) {
+  if (!data.startsWith("E:")) return data;
+  String hex = data.substring(2);
+  String result = "";
+  for (int i = 0; i < (int)hex.length(); i += 2) {
+    String byteStr = hex.substring(i, i + 2);
+    uint8_t enc = strtoul(byteStr.c_str(), NULL, 16);
+    result += (char)(enc ^ pin.charAt((i / 2) % pin.length()));
+  }
+  return result;
+}
+
+void two_factor_app() {
+  reset_buttons();
+
+  String savedPin = db[kk::TOTP_PIN].toString();
+  String pin;
+
+  if (savedPin.length() == 0) {
+    String newPin = totp_pin_input(true);
+    if (newPin.length() == 0) { exit(); return; }
+
+    oled.clear();
+    ui_rama("Подтвердите", true, true, false, false);
+    oled.setCursor(10, 3);
+    oled.print("Повторите PIN:");
+    oled.update();
+    delay(500);
+
+    String confirmPin = totp_pin_input(false);
+    if (confirmPin != newPin) {
+      oled.clear();
+      ui_rama("Ошибка", true, true, false, false);
+      oled.setCursor(15, 3);
+      oled.print("PIN не совпал!");
+      oled.update();
+      delay(1500);
+      exit(); return;
+    }
+
+    pin = newPin;
+    db[kk::TOTP_PIN] = pin;
+
+    // шифруем
+    String s1 = db[kk::TOTP_SECRET].toString();
+    String s2 = db[kk::TOTP_SECRET_2].toString();
+    if (s1.length() > 0 && !s1.startsWith("E:")) {
+      db[kk::TOTP_SECRET] = totp_encrypt(s1, pin);
+    }
+    if (s2.length() > 0 && !s2.startsWith("E:")) {
+      db[kk::TOTP_SECRET_2] = totp_encrypt(s2, pin);
+    }
+    db.update();
+
+    oled.clear();
+    ui_rama("Готово", true, true, false, false);
+    oled.setCursor(10, 3);
+    oled.print("PIN + шифрование");
+    oled.setCursor(20, 4);
+    oled.print("сохранены!");
+    oled.update();
+    delay(1500);
+  } else {
+    String enteredPin = totp_pin_input(false);
+    if (enteredPin.length() == 0) { exit(); return; }
+
+    if (enteredPin != savedPin) {
+      oled.clear();
+      ui_rama("Ошибка", true, true, false, false);
+      oled.setCursor(15, 3);
+      oled.print("Неверный PIN!");
+      oled.update();
+      delay(1500);
+      exit(); return;
+    }
+    pin = enteredPin;
+  }
+
+  reset_buttons();
+
+  String raw1 = db[kk::TOTP_SECRET].toString();
+  String raw2 = db[kk::TOTP_SECRET_2].toString();
+  bool needSave = false;
+  if (raw1.length() > 0 && !raw1.startsWith("E:")) {
+    db[kk::TOTP_SECRET] = totp_encrypt(raw1, pin);
+    needSave = true;
+  }
+  if (raw2.length() > 0 && !raw2.startsWith("E:")) {
+    db[kk::TOTP_SECRET_2] = totp_encrypt(raw2, pin);
+    needSave = true;
+  }
+  if (needSave) db.update();
+
+  String secrets[2];
+  secrets[0] = totp_decrypt(db[kk::TOTP_SECRET].toString(), pin);
+  secrets[1] = totp_decrypt(db[kk::TOTP_SECRET_2].toString(), pin);
+
+  if (secrets[0].length() == 0 && secrets[1].length() == 0) {
+    oled.clear();
+    ui_rama("2FA", true, true, false, false);
+    oled.setScale(1);
+    oled.setCursor(0, 3);
+    oled.print("Настройте ключ в");
+    oled.setCursor(0, 4);
+    oled.print("веб-настройках!");
+    oled.update();
+    while(!ok.isClick() && !ok.isHold()) { buttons_tick(); delay(10); }
+    exit(); return;
+  }
+
+  bool slotActive[2];
+  uint8_t keys[2][64];
+  int keyLens[2];
+  TOTP* totps[2] = {nullptr, nullptr};
+
+  for (int i = 0; i < 2; i++) {
+    keyLens[i] = 0;
+    if (secrets[i].length() > 0) {
+      keyLens[i] = base32_decode(secrets[i].c_str(), keys[i]);
+    }
+    slotActive[i] = (keyLens[i] > 0);
+    if (slotActive[i]) {
+      totps[i] = new TOTP(keys[i], keyLens[i]);
+    }
+  }
+
+
+  uint8_t currentSlot = slotActive[0] ? 0 : 1;
+
+  int tzOffset = db[kk::TOTP_UTC_OFFSET].toInt();
+  uint32_t last_s = 0;
+  uint32_t lastPeriod = 0;
+  bool forceFullRedraw = true;
+
+  while(true) {
+    buttons_tick();
+    if (ok.isHold()) {
+      for (int i = 0; i < 2; i++) if (totps[i]) delete totps[i];
+      exit(); return;
+    }
+
+    if ((left.isClick() || right.isClick()) && slotActive[0] && slotActive[1]) {
+      currentSlot = 1 - currentSlot;
+      forceFullRedraw = true;
+      lastPeriod = 0;
+      last_s = 0;
+    }
+
+    uint32_t now = timeToUnix(rtc.getTime()) + 946684800UL - (tzOffset * 3600UL);
+    if (now == last_s && !forceFullRedraw) { delay(50); continue; }
+    last_s = now;
+
+    uint32_t period = now / 30;
+    int remaining = 30 - (now % 30);
+
+    if (forceFullRedraw) {
+      forceFullRedraw = false;
+      lastPeriod = period;
+
+      oled.clear();
+      char title[12];
+      if (slotActive[0] && slotActive[1]) {
+        sprintf(title, "2FA [%d/2]", currentSlot + 1);
+      } else {
+        sprintf(title, "2FA");
+      }
+      ui_rama(title, true, true, false, false);
+
+      if (slotActive[0] && slotActive[1]) {
+        oled.setScale(1);
+        oled.setCursorXY(0, 30);
+        oled.print("<");
+        oled.setCursorXY(122, 30);
+        oled.print(">");
+      }
+
+      String code = totps[currentSlot]->getCode(now);
+      oled.setScale(2);
+      oled.setCursor(25, 3);
+      oled.print(code.substring(0, 3));
+      oled.print(" ");
+      oled.print(code.substring(3));
+
+      oled.update();
+    }
+
+    if (period != lastPeriod) {
+      lastPeriod = period;
+      String code = totps[currentSlot]->getCode(now);
+      oled.clear(20, 24, 110, 40);
+      oled.setScale(2);
+      oled.setCursor(25, 3);
+      oled.print(code.substring(0, 3));
+      oled.print(" ");
+      oled.print(code.substring(3));
+      oled.update(20, 24, 110, 40);
+    }
+
+    oled.clear(9, 44, 118, 63);
+    oled.setScale(1);
+    oled.setCursorXY(100, 46);
+    if (remaining < 10) oled.print(" ");
+    oled.print(remaining);
+    oled.rect(10, 56, 117, 60, OLED_STROKE);
+    if (remaining > 0) {
+      oled.rect(10, 56, 10 + (remaining * 107 / 30), 60, OLED_FILL);
+    }
+    oled.update(9, 44, 118, 63);
+    delay(50);
+  }
+}
 
 void app_store_menu() {
     reset_buttons();
