@@ -5030,7 +5030,7 @@ void app_store_menu() {
     JsonDocument doc;
     deserializeJson(doc, payload);
     
-    if (!doc.containsKey("apps")) {
+    if (!doc["apps"].is<JsonArray>()) {
         oled.clear();
         ui_rama("App Store", true, true, false, false);
         oled.setCursor(10, 3);
