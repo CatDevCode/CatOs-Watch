@@ -6,9 +6,9 @@
 // CatOs Sleep v0.1
 
 #ifdef CATOS_SPI_DISPLAY
-#define FIRMWARE_VERSION "s.0.1"
+#define FIRMWARE_VERSION "s.0.2"
 #else
-#define FIRMWARE_VERSION "w.0.1"
+#define FIRMWARE_VERSION "w.0.2"
 #endif
 
 #include <Arduino.h>
@@ -46,6 +46,8 @@
 #include <sha1.h>
 #include <TOTP.h>
 #include "custom_app.h"
+#include "Hopper_CatOS.h"
+#include "MicroCity_CatOS.h"
 #define USE_NIMBLE
 #include <BleMouse.h>
 #include <DFRobot_BMI160.h>
@@ -3260,7 +3262,9 @@ void open_graphical_games() { navigate_graphical_menu(&data_GamesMenu); }
 void open_graphical_wifi() { navigate_graphical_menu(&data_WifiMenu); }
 void open_graphical_utils() { navigate_graphical_menu(&data_UtilsMenu); }
 void open_graphical_main() { navigate_graphical_menu(&data_MainMenu); }
-
+void open_arduboy_games() {
+  navigate_graphical_menu(&data_ArduboyGamesMenu);
+}
 void drawRoundWatchFace() {
   oled.clear();
   

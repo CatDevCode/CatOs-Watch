@@ -25,7 +25,9 @@ extern void rouletteGame();
 extern void snakeGame();
 extern void custom_apps_menu();
 extern void playPong();
-// Утилиты
+extern void playHopper();
+extern void playMicroCity();
+extern void open_arduboy_games();
 extern void ShowFilesLittleFS(); // Читалка
 extern void calc();
 extern void stopwatch();
@@ -46,6 +48,7 @@ extern void app_store_menu();
 void open_graphical_games();
 void open_graphical_wifi();
 void open_graphical_utils();
+void navigate_graphical_menu(GraphMenu* menu);
 
 
 // =========================
@@ -55,6 +58,7 @@ void open_graphical_utils();
 // --- 1. МЕНЮ ИГР ---
 GraphMenuItem items_Games[] = {
   {"Дино",     dino_icon_24x24,            dinosaurGame},
+  {"Arduboy",   nullptr,                   open_arduboy_games},
   {"Пинг-Понг",dino_icon_24x24,            playPong},
 #ifndef CATOS_SPI_DISPLAY
   {"Тамогочи", catosgotchi_icon_24x24,     pet_menu},
@@ -64,6 +68,15 @@ GraphMenuItem items_Games[] = {
   {"Назад",    exit_bitmap_24x24,          nullptr}
 };
 GraphMenu data_GamesMenu = {"Игры", 40, items_Games, sizeof(items_Games)/sizeof(GraphMenuItem)};
+
+// ардубой
+GraphMenuItem items_ArduboyGames[] = {
+  {"Hopper",   nullptr,                    playHopper},
+  {"MicroCity",nullptr,                    playMicroCity},
+  {"Назад",    exit_bitmap_24x24,          nullptr}
+};
+GraphMenu data_ArduboyGamesMenu = {"Arduboy", 55, items_ArduboyGames, sizeof(items_ArduboyGames)/sizeof(GraphMenuItem)};
+
 
 
 // --- 2. МЕНЮ WIFI ---
