@@ -6,9 +6,9 @@
 // CatOs Sleep v0.1
 
 #ifdef CATOS_SPI_DISPLAY
-#define FIRMWARE_VERSION "s.0.2"
+#define FIRMWARE_VERSION "s.0.3"
 #else
-#define FIRMWARE_VERSION "w.0.2"
+#define FIRMWARE_VERSION "w.0.3"
 #endif
 
 #include <Arduino.h>
