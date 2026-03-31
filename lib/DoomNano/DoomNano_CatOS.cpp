@@ -25,6 +25,7 @@ extern GButton PWR;
 
 // макросы
 #define dn_swap(a, b) do { typeof(a) temp = a; a = b; b = temp; } while (0)
+#define dn_sign(a, b) (double)(a > b ? 1 : (b > a ? -1 : 0))
 const static uint8_t dn_bit_mask[8] = { 128, 64, 32, 16, 8, 4, 2, 1 };
 #define dn_read_bit(b, n) (b & dn_bit_mask[n] ? 1 : 0)
 
