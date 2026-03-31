@@ -48,6 +48,7 @@
 #include "custom_app.h"
 #include "Hopper_CatOS.h"
 #include "MicroCity_CatOS.h"
+#include "DoomNano_CatOS.h"
 #define USE_NIMBLE
 #include <BleMouse.h>
 #include <DFRobot_BMI160.h>
@@ -2719,7 +2720,7 @@ int getFilesCount() {
   File file = root.openNextFile();
   while (file) {
     String filename = file.name();
-    if (filename.endsWith(".txt") || filename.endsWith(".h")) {
+    if (filename.endsWith(".txt") || filename.endsWith(".h") || filename.endsWith(".cvid") || filename.endsWith(".catvid")) {
       count++;
     }
     file.close();
@@ -2735,7 +2736,7 @@ String getFilenameByIndex(int idx) {
   File file = root.openNextFile();
   while (file) {
     String filename = file.name();
-    if (filename.endsWith(".txt") || filename.endsWith(".h")) {
+    if (filename.endsWith(".txt") || filename.endsWith(".h") || filename.endsWith(".catvid")) {
       if (i == idx) {
         String name = "/" + filename;
         file.close();
@@ -2949,14 +2950,87 @@ void enterToReadTxtFile(String filename){
     yield();                                        // Внутренний поллинг ESP
   }
 }
+void enterToReadVideoFile(String filename) {
+  File f = LittleFS.open(filename, "r");
+  if (!f) {
+    files = getFilesCount();
+    drawMainMenu();
+    return;
+  }
+
+  //первый байт это фпс из файла
+  uint8_t targetFps = f.read();
+  if (targetFps == 0 || targetFps > 60) targetFps = 25; //защита
+  unsigned long frameTime = 1000 / targetFps; //мс на кадр
+
+  int bytePos = 0;
+  int bitPos = 0;
+  
+  oled.clear();
+  setCpuFrequencyMhz(240);
+  #ifndef CATOS_SPI_DISPLAY
+  Wire.setClock(800000L); 
+  #endif
+  
+  unsigned long frameStart = millis();
+  
+  while (f.available()) {
+    uint8_t packet = f.read();
+    
+    if (packet == 0) { //маркер конца кадра
+      oled.update();
+      
+      //ждём до конца кадра
+      unsigned long elapsed = millis() - frameStart;
+      if (elapsed < frameTime) {
+        delay(frameTime - elapsed);
+      }
+      frameStart = millis();
+      
+      bytePos = 0;
+      bitPos = 0;
+      
+      buttons_tick();
+      if (left.isClick()) break;
+      continue;
+    }
+
+    bool color = (packet >> 7) & 1;
+    uint8_t count = packet & 0x7F;
+
+    for (int i = 0; i < count; i++) {
+      if (color) oled._oled_buffer[bytePos] |= (1 << bitPos);
+      else oled._oled_buffer[bytePos] &= ~(1 << bitPos);
+
+      bitPos++;
+      if (bitPos == 8) {
+        bitPos = 0;
+        bytePos++;
+        if (bytePos >= 1024) break; 
+      }
+    }
+    if (bytePos >= 1024) { bytePos = 0; bitPos = 0; }
+  }
+  
+  f.close();
+  #ifndef CATOS_SPI_DISPLAY
+  Wire.setClock(400000L);
+  #endif
+  setCpuFrequencyMhz(80);
+  oled.clear();
+  files = getFilesCount();
+  drawMainMenu();
+}
+
 void enterToReadFile(void) { 
   setCpuFrequencyMhz(240);
   String filename = getFilenameByIndex(cursor);
   if (filename.endsWith(".h")) {
     enterToReadBmpFile(filename);
   } else if(filename.endsWith(".txt")) {
-    // Вызов существующей функции для текстовых файлов
     enterToReadTxtFile(filename);
+  } else if(filename.endsWith(".catvid") || filename.endsWith(".catvid")) {
+    enterToReadVideoFile(filename);
   } else {
   }                
 }

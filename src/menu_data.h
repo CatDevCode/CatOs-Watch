@@ -27,6 +27,7 @@ extern void custom_apps_menu();
 extern void playPong();
 extern void playHopper();
 extern void playMicroCity();
+extern void playDoomNano();
 extern void open_arduboy_games();
 extern void ShowFilesLittleFS(); // Читалка
 extern void calc();
@@ -73,6 +74,7 @@ GraphMenu data_GamesMenu = {"Игры", 40, items_Games, sizeof(items_Games)/siz
 GraphMenuItem items_ArduboyGames[] = {
   {"Hopper",   nullptr,                    playHopper},
   {"MicroCity",nullptr,                    playMicroCity},
+  {"Doom",     nullptr,                    playDoomNano},
   {"Назад",    exit_bitmap_24x24,          nullptr}
 };
 GraphMenu data_ArduboyGamesMenu = {"Arduboy", 55, items_ArduboyGames, sizeof(items_ArduboyGames)/sizeof(GraphMenuItem)};
